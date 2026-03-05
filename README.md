@@ -107,3 +107,47 @@ sudo systemctl restart nginx
 *   **Status බැලීම:** `pm2 status`
 *   **Speed:** උපරිම වේගය ලබා ගැනීමට **IDM (32 connections)** භාවිතා කරන්න. browser එකෙන් download කරන විට ඔබේ VPS speed එක සහ connection එක අනුව වේගය තීරණය වේ.
 *   **Session Error:** කවදා හෝ `SESSION_REVOKED` ආවොත් `direct_dl_bot.session` මකා දමා නැවත **4 වන පියවර** කරන්න.
+
+---
+
+## 7. Local Telegram Bot API සහ Auto-Delete Setup (නව සංස්කරණය)
+
+මෙම Bot එක දැන් **Local API Server** එකක් සමඟ වැඩ කිරීමට සහ ඩවුන්ලෝඩ් කළ පසු ෆයිල් එක VPS එකෙන් **Auto-Delete** වීමට සැකසිය හැක.
+
+### A. Local API Server එක Build කිරීම
+ඔබේ VPS Terminal එකේ මෙම Command ටික රන් කරන්න:
+
+```bash
+sudo apt update
+sudo apt install g++ make cmake git zlib1g-dev libssl-dev gperf -y
+
+git clone --recursive https://github.com/tdlib/telegram-bot-api.git
+cd telegram-bot-api
+mkdir -p build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake --build . --target install
+```
+
+### B. Local API Server එක Run කිරීම
+මෙය පාලනය කිරීමට PM2 භාවිතා කරන්න (API_ID සහ API_HASH ඔබේ ඒවා ලබා දෙන්න):
+
+```bash
+# API සර්වර් එක Background එකේ රන් කිරීම
+pm2 start "telegram-bot-api --api-id=35816137 --api-hash=f457c1c04f3fba7fd789f9e738143c6f --local --http-port=8081" --name "tg-local-api"
+```
+
+### C. Bot එකේ අලුත් වෙනස්කම් (Auto-Delete)
+යාවත්කාලීන කරන ලද `bot.py` මගින් පහත දේ සිදුවේ:
+1. පරිශීලකයා ලින්ක් එක ක්ලික් කළ විට බොට් විසින් ගොනුව VPS එකට ඩවුන්ලෝඩ් කරයි.
+2. එම ගොනුව පරිශීලකයාට ඩවුන්ලෝඩ් වීමට සලස්වයි.
+3. ඩවුන්ලෝඩ් එක අවසන් වූ සැණින් එම ගොනුව VPS එකෙන් මැකී යයි.
+
+**Bot එක Restart කරන්න:**
+```bash
+pm2 restart my-bot
+```
+
+### මෙම ක්‍රමයේ වාසි:
+- **4GB Support:** ටෙලිග්‍රෑම් හි ඇති 2GB සීමාව නොමැතිව 4GB දක්වා ෆයිල් හැසිරවිය හැක.
+- **Disk Space Saving:** ෆයිල්ස් එකතු වී VPS එකේ ඉඩ පිරීම වැළකේ.
+- **High Speed:** දත්ත හුවමාරුව අති වේගවත් වේ.

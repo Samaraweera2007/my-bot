@@ -18,23 +18,26 @@ logger = logging.getLogger(__name__)
 
 # Pyrogram log reduction
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
-logging.getLogger("pyrogram.crypto").setLevel(logging.ERROR)
-logging.getLogger("pyrogram.session.session").setLevel(logging.ERROR)
 
 # --- CONFIGURATION ---
 API_ID = 35816137
 API_HASH = "f457c1c04f3fba7fd789f9e738143c6f"
 DOMAIN = "https://tele.cmovie.xyz"
 PORT = 8080
-# ---------------------
+DOWNLOAD_DIR = "./vps_downloads"
 
+# Create download directory if not exists
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
+
+# --- CLIENT SETUP WITH LOCAL API ---
 app = Client(
     "direct_dl_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     in_memory=False,
-    sleep_threshold=60,
-    workers=200  # Increased workers for high-speed parallel handling
+    sleep_threshold=120,
+    workers=200
 )
 
 @app.on_message(filters.command("link") & filters.me)
@@ -57,10 +60,10 @@ async def generate_link(client, message):
     link = f"{DOMAIN}/dl/{chat_id}/{msg_id}/{file_name}"
     
     await message.reply_text(
-        f"🚀 **High-Speed Link Ready!**\n\n"
+        f"🚀 **Fast Link Ready (Local API Mode)**\n\n"
         f"📁 **File:** `{file_name}`\n"
         f"🔗 **Link:** `{link}`\n\n"
-        f"💡 **IDM** භාවිතා කරන්න. (Connections 32 දමා ගන්න)",
+        f"⚠️ *ඩවුන්ලෝඩ් එක අවසන් වූ පසු ෆයිල් එක VPS එකෙන් මැකී යනු ඇත.*",
         disable_web_page_preview=True
     )
 
@@ -83,53 +86,31 @@ async def download_handler(request):
     except Exception as e:
         return web.Response(status=500, text=f"Telegram Error: {str(e)}")
 
-    media = message.document or message.video or message.audio or message.animation
-    if not media:
-        return web.Response(status=404, text="No Media Found")
+    # VPS එකේ තාවකාලිකව සේව් වන ගොනුවේ නම
+    file_path = os.path.join(DOWNLOAD_DIR, f"{msg_id}_{filename}")
 
-    file_size = media.file_size
-    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    
-    # Handle Range Requests (Crucial for Speed in IDM)
-    range_header = request.headers.get("Range")
-    start = 0
-    end = file_size - 1
-    
-    if range_header:
+    # 1. පයිල් එක දැනටමත් VPS එකේ නැත්නම් ඩවුන්ලෝඩ් කරන්න
+    if not os.path.exists(file_path):
+        logger.info(f"Downloading {filename} for streaming...")
         try:
-            # Parse 'bytes=start-end'
-            bytes_range = range_header.replace("bytes=", "").split("-")
-            start = int(bytes_range[0])
-            if bytes_range[1]:
-                end = int(bytes_range[1])
-        except Exception:
-            pass
+            await app.download_media(message, file_name=file_path)
+        except Exception as e:
+            return web.Response(status=500, text=f"Download Error: {str(e)}")
 
-    content_length = end - start + 1
+    # 2. FileResponse හරහා පරිශීලකයාට ලබා දීම
+    response = web.FileResponse(file_path)
     
-    headers = {
-        "Content-Type": mime_type,
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "Content-Length": str(content_length),
-        "Accept-Ranges": "bytes",
-        "Connection": "keep-alive",
-    }
-    
-    if range_header:
-        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        status = 206 # Partial Content
-    else:
-        status = 200
+    # 3. AUTO-DELETE: යවා අවසන් වූ විගස මැකීමට cleanup function එකක්.
+    async def cleanup_file(request, resp):
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Deleted temporary file: {file_path}")
+            except Exception as e:
+                logger.error(f"Error deleting file: {e}")
 
-    response = web.StreamResponse(status=status, headers=headers)
-    await response.prepare(request)
-
-    try:
-        # Tgcrypto must be installed for maximum speed!
-        async for chunk in app.stream_media(message, offset=start):
-            await response.write(chunk)
-    except Exception as e:
-        logger.error(f"Streaming error: {e}")
+    # Response එක prepare කරන විට cleanup function එක add කිරීම
+    request.app.on_response_prepare.append(cleanup_file)
     
     return response
 
@@ -139,7 +120,7 @@ async def start_services():
     await app.start()
 
     print("Starting Web Server...")
-    web_app = web.Application(client_max_size=0) # No limit on size
+    web_app = web.Application(client_max_size=0)
     web_app.add_routes(routes)
     
     runner = web.AppRunner(web_app)
@@ -150,6 +131,7 @@ async def start_services():
     me = await app.get_me()
     print(f"DONE! Logged in as: {me.first_name}")
     print(f"WEB SERVER RUNNING ON PORT {PORT}")
+    print(f"DOWNLOAD CACHE: {os.path.abspath(DOWNLOAD_DIR)}")
     print("----------------------------------------")
     await asyncio.Event().wait()
 
@@ -160,4 +142,5 @@ if __name__ == "__main__":
         print("\nStopping...")
     except Exception as e:
         print(f"Fatal Error: {e}")
+
 
